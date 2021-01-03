@@ -114,56 +114,85 @@ impl Board {
         false
     }
 
-    fn do_move(&mut self, action: Action) {
+    fn create_children(&self) -> Vec<(Board, Action)> {
         let px = self.player.0;
         let py = self.player.1;
 
-        match action {
-            Action::Up => match self.get_tile(px, py - 1) {
-                Tile::Empty => self.player.1 = py - 1,
-                Tile::Wall => (),
-                Tile::Box => {
-                    if self.get_tile(px, py - 2) == Tile::Empty {
-                        self.set_tile(px, py - 2, Tile::Box);
-                        self.set_tile(px, py - 1, Tile::Empty);
-                        self.player.1 = py - 1;
-                    }
+        let mut children = Vec::new();
+
+        match self.get_tile(px, py - 1) {
+            Tile::Empty => {
+                let mut child = self.clone();
+                child.player.1 = py - 1;
+                children.push((child, Action::Up));
+            }
+            Tile::Wall => (),
+            Tile::Box => {
+                if self.get_tile(px, py - 2) == Tile::Empty {
+                    let mut child = self.clone();
+                    child.set_tile(px, py - 2, Tile::Box);
+                    child.set_tile(px, py - 1, Tile::Empty);
+                    child.player.1 = py - 1;
+                    children.push((child, Action::Up));
                 }
-            },
-            Action::Down => match self.get_tile(px, py + 1) {
-                Tile::Empty => self.player.1 = py + 1,
-                Tile::Wall => (),
-                Tile::Box => {
-                    if self.get_tile(px, py + 2) == Tile::Empty {
-                        self.set_tile(px, py + 2, Tile::Box);
-                        self.set_tile(px, py + 1, Tile::Empty);
-                        self.player.1 = py + 1;
-                    }
-                }
-            },
-            Action::Left => match self.get_tile(px - 1, py) {
-                Tile::Empty => self.player.0 = px - 1,
-                Tile::Wall => (),
-                Tile::Box => {
-                    if self.get_tile(px - 2, py) == Tile::Empty {
-                        self.set_tile(px - 2, py, Tile::Box);
-                        self.set_tile(px - 1, py, Tile::Empty);
-                        self.player.0 = px - 1;
-                    }
-                }
-            },
-            Action::Right => match self.get_tile(px + 1, py) {
-                Tile::Empty => self.player.0 = px + 1,
-                Tile::Wall => (),
-                Tile::Box => {
-                    if self.get_tile(px + 2, py) == Tile::Empty {
-                        self.set_tile(px + 2, py, Tile::Box);
-                        self.set_tile(px + 1, py, Tile::Empty);
-                        self.player.0 = px + 1;
-                    }
-                }
-            },
+            }
         }
+
+        match self.get_tile(px, py + 1) {
+            Tile::Empty => {
+                let mut child = self.clone();
+                child.player.1 = py + 1;
+                children.push((child, Action::Down));
+            }
+            Tile::Wall => (),
+            Tile::Box => {
+                if self.get_tile(px, py + 2) == Tile::Empty {
+                    let mut child = self.clone();
+                    child.set_tile(px, py + 2, Tile::Box);
+                    child.set_tile(px, py + 1, Tile::Empty);
+                    child.player.1 = py + 1;
+                    children.push((child, Action::Down));
+                }
+            }
+        }
+
+        match self.get_tile(px - 1, py) {
+            Tile::Empty => {
+                let mut child = self.clone();
+                child.player.0 = px - 1;
+                children.push((child, Action::Left));
+            }
+            Tile::Wall => (),
+            Tile::Box => {
+                if self.get_tile(px - 2, py) == Tile::Empty {
+                    let mut child = self.clone();
+                    child.set_tile(px - 2, py, Tile::Box);
+                    child.set_tile(px - 1, py, Tile::Empty);
+                    child.player.0 = px - 1;
+                    children.push((child, Action::Left));
+                }
+            }
+        }
+
+        match self.get_tile(px + 1, py) {
+            Tile::Empty => {
+                let mut child = self.clone();
+                child.player.0 = px + 1;
+                children.push((child, Action::Right));
+            }
+            Tile::Wall => (),
+            Tile::Box => {
+                if self.get_tile(px + 2, py) == Tile::Empty {
+                    let mut child = self.clone();
+                    child.set_tile(px + 2, py, Tile::Box);
+                    child.set_tile(px + 1, py, Tile::Empty);
+                    child.player.0 = px + 1;
+                    children.push((child, Action::Right));
+                }
+            }
+        }
+
+        children
     }
 }
 
@@ -286,15 +315,12 @@ fn main() -> std::io::Result<()> {
                     continue;
                 }
 
-                for action in &[Action::Up, Action::Down, Action::Left, Action::Right] {
-                    let mut child = board.clone();
-                    child.do_move(*action);
-
+                for (child, action) in board.create_children() {
                     if !seen.contains(&child) {
                         seen.insert(child.clone());
 
                         let mut child_path = path.clone();
-                        child_path.push(*action);
+                        child_path.push(action);
                         queue.push_back((child, child_path));
                     }
                 }
