@@ -18,35 +18,48 @@ enum Tile {
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 struct Board {
-    width: usize,
-    height: usize,
-    player: (usize, usize),
-    goals: Vec<(usize, usize)>,
+    width: u8,
+    height: u8,
+    player: (u8, u8),
+    goals: Vec<(u8, u8)>,
     tiles: Vec<Tile>,
 }
 
+struct ConstState {
+    width: u8,
+    height: u8,
+    goals: Vec<(u8, u8)>,
+    walls: Vec<bool>,
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct SolveState {
+    player: (u8, u8),
+    boxes: Vec<(u8, u8)>,
+}
+
 impl Board {
-    fn get_tile(&self, x: usize, y: usize) -> Tile {
-        self.tiles[y * self.width + x]
+    fn get_tile(&self, x: u8, y: u8) -> Tile {
+        self.tiles[y as usize * self.width as usize + x as usize]
     }
 
-    fn set_tile(&mut self, x: usize, y: usize, tile: Tile) {
-        self.tiles[y * self.width + x] = tile
+    fn set_tile(&mut self, x: u8, y: u8, tile: Tile) {
+        self.tiles[y as usize * self.width as usize + x as usize] = tile
     }
 
-    fn is_empty(&self, x: usize, y: usize) -> bool {
+    fn is_empty(&self, x: u8, y: u8) -> bool {
         self.get_tile(x, y) == Tile::Empty
     }
 
-    fn is_wall(&self, x: usize, y: usize) -> bool {
+    fn is_wall(&self, x: u8, y: u8) -> bool {
         self.get_tile(x, y) == Tile::Wall
     }
 
-    fn is_box(&self, x: usize, y: usize) -> bool {
+    fn is_box(&self, x: u8, y: u8) -> bool {
         self.get_tile(x, y) == Tile::Box
     }
 
-    fn is_goal(&self, x: usize, y: usize) -> bool {
+    fn is_goal(&self, x: u8, y: u8) -> bool {
         for (gx, gy) in &self.goals {
             if x == *gx && y == *gy {
                 return true;
@@ -194,6 +207,67 @@ impl Board {
 
         children
     }
+
+    fn to_const_and_solve(self) -> (ConstState, SolveState) {
+        let mut walls = vec![false; self.tiles.len()];
+        for (i, tile) in self.tiles.iter().enumerate() {
+            if tile == &Tile::Wall {
+                walls[i] = true;
+            }
+        }
+
+        let solve_state = self.extract_solve_state();
+
+        (
+            ConstState {
+                width: self.width,
+                height: self.height,
+                goals: self.goals,
+                walls: walls,
+            },
+            solve_state,
+        )
+    }
+
+    fn extract_solve_state(&self) -> SolveState {
+        let mut boxes = Vec::new();
+        boxes.reserve_exact(self.goals.len());
+        for (i, tile) in self.tiles.iter().enumerate() {
+            match tile {
+                Tile::Box => boxes.push((
+                    (i % self.width as usize) as u8,
+                    (i / self.width as usize) as u8,
+                )),
+                _ => (),
+            }
+        }
+
+        SolveState {
+            player: self.player,
+            boxes: boxes,
+        }
+    }
+
+    fn from_const_and_solve(const_state: &ConstState, solve_state: &SolveState) -> Self {
+        let mut tiles = vec![Tile::Empty; const_state.walls.len()];
+        for (i, wall) in const_state.walls.iter().enumerate() {
+            if *wall {
+                tiles[i] = Tile::Wall;
+            }
+        }
+
+        for (bx, by) in &solve_state.boxes {
+            tiles[*by as usize * const_state.width as usize + *bx as usize] = Tile::Box;
+        }
+
+        Board {
+            width: const_state.width,
+            height: const_state.height,
+            player: solve_state.player,
+            goals: const_state.goals.clone(),
+            tiles: tiles,
+        }
+    }
 }
 
 fn parse_level_string(level: &String) -> Result<Board, &'static str> {
@@ -218,6 +292,12 @@ fn parse_level_string(level: &String) -> Result<Board, &'static str> {
     let height = lines.len();
     let width = lines.iter().map(|s| s.len()).max().unwrap();
 
+    if width > u8::MAX.into() {
+        return Err("Level width is greater than 255.");
+    } else if height > u8::MAX.into() {
+        return Err("Level height is greater than 255.");
+    }
+
     let mut players = Vec::new();
 
     let mut goals = Vec::new();
@@ -229,10 +309,10 @@ fn parse_level_string(level: &String) -> Result<Board, &'static str> {
         for (j, c) in line.chars().enumerate() {
             match c {
                 '#' => tiles[width * i + j] = Tile::Wall,
-                'p' | '@' => players.push((j, i)),
+                'p' | '@' => players.push((j as u8, i as u8)),
                 'P' | '+' => {
-                    players.push((j, i));
-                    goals.push((j, i));
+                    players.push((j as u8, i as u8));
+                    goals.push((j as u8, i as u8));
                 }
                 'b' | '$' => {
                     tiles[width * i + j] = Tile::Box;
@@ -240,10 +320,10 @@ fn parse_level_string(level: &String) -> Result<Board, &'static str> {
                 }
                 'B' | '*' => {
                     tiles[width * i + j] = Tile::Box;
-                    goals.push((j, i));
+                    goals.push((j as u8, i as u8));
                     num_boxes += 1;
                 }
-                '.' => goals.push((j, i)),
+                '.' => goals.push((j as u8, i as u8)),
                 ' ' | '-' | '_' => (),
                 _ => panic!(),
             }
@@ -263,8 +343,8 @@ fn parse_level_string(level: &String) -> Result<Board, &'static str> {
     // TODO: verify the level is enclosed in walls
 
     Ok(Board {
-        width: width,
-        height: height,
+        width: width as u8,
+        height: height as u8,
         player: players[0],
         goals: goals,
         tiles: tiles,
@@ -293,11 +373,13 @@ fn main() -> std::io::Result<()> {
     let level_string = std::fs::read_to_string(&args[1])?;
     let start = parse_level_string(&level_string).unwrap();
 
-    let mut seen: HashSet<Board> = HashSet::new();
-    let mut queue: VecDeque<(Board, Vec<Action>)> = VecDeque::new();
+    let (const_state, start_state) = start.to_const_and_solve();
 
-    seen.insert(start.clone());
-    queue.push_back((start, vec![]));
+    let mut seen: HashSet<SolveState> = HashSet::new();
+    let mut queue: VecDeque<(SolveState, Vec<Action>)> = VecDeque::new();
+
+    seen.insert(start_state.clone());
+    queue.push_back((start_state, vec![]));
 
     loop {
         match queue.pop_front() {
@@ -305,9 +387,15 @@ fn main() -> std::io::Result<()> {
                 println!("Exhausted search, level is not solvable.");
                 break;
             }
-            Some((board, path)) => {
+            Some((solve_state, path)) => {
+                let board = Board::from_const_and_solve(&const_state, &solve_state);
+
                 if board.is_satisfied() {
-                    println!("Found solution in {} steps: {}", path.len(), path_to_string(&path));
+                    println!(
+                        "Found solution in {} moves: {}",
+                        path.len(),
+                        path_to_string(&path)
+                    );
                     break;
                 }
 
@@ -316,12 +404,14 @@ fn main() -> std::io::Result<()> {
                 }
 
                 for (child, action) in board.create_children() {
-                    if !seen.contains(&child) {
-                        seen.insert(child.clone());
+                    let child_state = child.extract_solve_state();
+
+                    if !seen.contains(&child_state) {
+                        seen.insert(child_state.clone());
 
                         let mut child_path = path.clone();
                         child_path.push(action);
-                        queue.push_back((child, child_path));
+                        queue.push_back((child_state, child_path));
                     }
                 }
             }
