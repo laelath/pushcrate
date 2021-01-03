@@ -34,6 +34,27 @@ impl Board {
         self.tiles[y * self.width + x] = tile
     }
 
+    fn is_empty(&self, x: usize, y: usize) -> bool {
+        self.get_tile(x, y) == Tile::Empty
+    }
+
+    fn is_wall(&self, x: usize, y: usize) -> bool {
+        self.get_tile(x, y) == Tile::Wall
+    }
+
+    fn is_box(&self, x: usize, y: usize) -> bool {
+        self.get_tile(x, y) == Tile::Box
+    }
+
+    fn is_goal(&self, x: usize, y: usize) -> bool {
+        for (gx, gy) in &self.goals {
+            if x == *gx && y == *gy {
+                return true;
+            }
+        }
+        false
+    }
+
     fn is_satisfied(&self) -> bool {
         for (x, y) in &self.goals {
             if self.get_tile(*x, *y) != Tile::Box {
@@ -41,6 +62,56 @@ impl Board {
             }
         }
         true
+    }
+
+    fn is_unsolvable(&self) -> bool {
+        // board is unsolvable if there is a box in a corner not on a goal
+        for x in 1..self.width - 1 {
+            for y in 1..self.height - 1 {
+                if self.is_box(x, y) {
+                    if (self.is_wall(x - 1, y) && self.is_wall(x, y - 1))
+                        || (self.is_wall(x, y - 1) && self.is_wall(x + 1, y))
+                        || (self.is_wall(x + 1, y) && self.is_wall(x, y + 1))
+                        || (self.is_wall(x, y + 1) && self.is_wall(x - 1, y))
+                    {
+                        if !self.is_goal(x, y) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // board is unsolvable if there are two boxes next to each other next to walls
+        for x in 1..self.width - 2 {
+            for y in 1..self.height - 1 {
+                if self.is_box(x, y)
+                    && self.is_box(x + 1, y)
+                    && (self.is_wall(x, y - 1) || self.is_wall(x, y + 1))
+                    && (self.is_wall(x + 1, y - 1) || self.is_wall(x + 1, y + 1))
+                {
+                    if !(self.is_goal(x, y) && self.is_goal(x + 1, y)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        for x in 1..self.width - 1 {
+            for y in 1..self.height - 2 {
+                if self.is_box(x, y)
+                    && self.is_box(x, y + 1)
+                    && (self.is_wall(x - 1, y) || self.is_wall(x + 1, y))
+                    && (self.is_wall(x - 1, y + 1) || self.is_wall(x + 1, y + 1))
+                {
+                    if !(self.is_goal(x, y) && self.is_goal(x, y + 1)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     fn do_move(&mut self, action: Action) {
@@ -207,8 +278,12 @@ fn main() -> std::io::Result<()> {
             }
             Some((board, path)) => {
                 if board.is_satisfied() {
-                    println!("Found solution: {}", path_to_string(&path));
+                    println!("Found solution in {} steps: {}", path.len(), path_to_string(&path));
                     break;
+                }
+
+                if board.is_unsolvable() {
+                    continue;
                 }
 
                 for action in &[Action::Up, Action::Down, Action::Left, Action::Right] {
