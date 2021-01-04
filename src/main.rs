@@ -22,7 +22,6 @@ enum Tile {
 #[derive(PartialEq, Eq, Clone)]
 struct Board {
     width: u8,
-    height: u8,
     player: (u8, u8),
     goals: Vec<(u8, u8)>,
     tiles: Vec<Tile>,
@@ -30,7 +29,6 @@ struct Board {
 
 struct ConstState {
     width: u8,
-    height: u8,
     goals: Vec<(u8, u8)>,
     walls: Vec<bool>,
 }
@@ -317,7 +315,6 @@ impl Board {
 
         ConstState {
             width: self.width,
-            height: self.height,
             goals: self.goals.clone(),
             walls: walls,
         }
@@ -357,7 +354,6 @@ impl Board {
 
         Board {
             width: const_state.width,
-            height: const_state.height,
             player: solve_state.player,
             goals: const_state.goals.clone(),
             tiles: tiles,
@@ -439,7 +435,6 @@ fn parse_level_string(level: &String) -> Result<Board, &'static str> {
 
     Ok(Board {
         width: width as u8,
-        height: height as u8,
         player: players[0],
         goals: goals,
         tiles: tiles,
