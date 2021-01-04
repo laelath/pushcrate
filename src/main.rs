@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
+use std::time::Instant;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum Action {
@@ -134,48 +135,45 @@ impl Board {
     }
 
     fn is_unsolvable(&self) -> bool {
-        // board is unsolvable if there is a box in a corner not on a goal
-        for x in 1..self.width - 1 {
-            for y in 1..self.height - 1 {
-                if self.is_box(x, y) {
-                    if (self.is_wall(x - 1, y) && self.is_wall(x, y - 1))
-                        || (self.is_wall(x, y - 1) && self.is_wall(x + 1, y))
-                        || (self.is_wall(x + 1, y) && self.is_wall(x, y + 1))
-                        || (self.is_wall(x, y + 1) && self.is_wall(x - 1, y))
-                    {
-                        if !self.is_goal(x, y) {
-                            return true;
-                        }
-                    }
+        for (x, y) in self
+            .tiles
+            .iter()
+            .enumerate()
+            .filter(|(_, tile)| tile == &&Tile::Box)
+            .map(|(i, _)| {
+                (
+                    (i % self.width as usize) as u8,
+                    (i / self.width as usize) as u8,
+                )
+            })
+        {
+            // board is unsolvable if there is a box in a corner not on a goal
+            if (self.is_wall(x - 1, y) && self.is_wall(x, y - 1))
+                || (self.is_wall(x, y - 1) && self.is_wall(x + 1, y))
+                || (self.is_wall(x + 1, y) && self.is_wall(x, y + 1))
+                || (self.is_wall(x, y + 1) && self.is_wall(x - 1, y))
+            {
+                if !self.is_goal(x, y) {
+                    return true;
                 }
             }
-        }
 
-        // board is unsolvable if there are two boxes next to each other next to walls
-        for x in 1..self.width - 2 {
-            for y in 1..self.height - 1 {
-                if self.is_box(x, y)
-                    && self.is_box(x + 1, y)
-                    && (self.is_wall(x, y - 1) || self.is_wall(x, y + 1))
-                    && (self.is_wall(x + 1, y - 1) || self.is_wall(x + 1, y + 1))
-                {
-                    if !(self.is_goal(x, y) && self.is_goal(x + 1, y)) {
-                        return true;
-                    }
+            // board is unsolvable if there are two boxes next to each other next to walls
+            if self.is_box(x + 1, y)
+                && (self.is_wall(x, y - 1) || self.is_wall(x, y + 1))
+                && (self.is_wall(x + 1, y - 1) || self.is_wall(x + 1, y + 1))
+            {
+                if !(self.is_goal(x, y) && self.is_goal(x + 1, y)) {
+                    return true;
                 }
             }
-        }
 
-        for x in 1..self.width - 1 {
-            for y in 1..self.height - 2 {
-                if self.is_box(x, y)
-                    && self.is_box(x, y + 1)
-                    && (self.is_wall(x - 1, y) || self.is_wall(x + 1, y))
-                    && (self.is_wall(x - 1, y + 1) || self.is_wall(x + 1, y + 1))
-                {
-                    if !(self.is_goal(x, y) && self.is_goal(x, y + 1)) {
-                        return true;
-                    }
+            if self.is_box(x, y + 1)
+                && (self.is_wall(x - 1, y) || self.is_wall(x + 1, y))
+                && (self.is_wall(x - 1, y + 1) || self.is_wall(x + 1, y + 1))
+            {
+                if !(self.is_goal(x, y) && self.is_goal(x, y + 1)) {
+                    return true;
                 }
             }
         }
@@ -184,27 +182,27 @@ impl Board {
     }
 
     fn heuristic(&self) -> u32 {
+        let boxes: Vec<_> = self
+            .tiles
+            .iter()
+            .enumerate()
+            .filter(|(_, tile)| tile == &&Tile::Box)
+            .map(|(i, _)| {
+                (
+                    (i % self.width as usize) as u32,
+                    (i / self.width as usize) as u32,
+                )
+            })
+            .collect();
+
         let mut h = 0;
 
         // requires each box to be moved to a goal
         // therefore it takes at least as many moves as it takes to move each
         // box to the goal closest to it
-        let mut boxes = Vec::new();
-        boxes.reserve_exact(self.goals.len());
-
-        for (i, tile) in self.tiles.iter().enumerate() {
-            if tile == &Tile::Box {
-                let tx = i as u32 % self.width as u32;
-                let ty = i as u32 / self.width as u32;
-
-                boxes.push((tx, ty));
-            }
-        }
-
-        let boxes = boxes;
-
         h += boxes
             .iter()
+            .filter(|(bx, by)| !self.is_goal(*bx as u8, *by as u8))
             .map(|(bx, by)| {
                 self.goals
                     .iter()
@@ -215,15 +213,13 @@ impl Board {
             .sum::<u32>();
 
         // requires the player to move next to a box to start pushing it
-        // therefore we add the the minimum moves to the closest box
-        let px = self.player.0 as u32;
-        let py = self.player.1 as u32;
-
+        // therefore we add the the minimum moves to the closest box not on a goal
         h += boxes
             .iter()
-            .map(|(bx, by)| manhattan_distance((px, py), (*bx, *by)))
+            .filter(|(bx, by)| !self.is_goal(*bx as u8, *by as u8))
+            .map(|(bx, by)| manhattan_distance((self.player.0 as u32, self.player.1 as u32), (*bx, *by)))
             .min()
-            .unwrap()
+            .unwrap_or(1)
             // subtract one since we only need to move next to the box
             - 1;
 
@@ -328,21 +324,20 @@ impl Board {
     }
 
     fn extract_solve_state(&self) -> SolveState {
-        let mut boxes = Vec::new();
-        boxes.reserve_exact(self.goals.len());
-        for (i, tile) in self.tiles.iter().enumerate() {
-            match tile {
-                Tile::Box => boxes.push((
-                    (i % self.width as usize) as u8,
-                    (i / self.width as usize) as u8,
-                )),
-                _ => (),
-            }
-        }
-
         SolveState {
             player: self.player,
-            boxes: boxes,
+            boxes: self
+                .tiles
+                .iter()
+                .enumerate()
+                .filter(|(_, tile)| tile == &&Tile::Box)
+                .map(|(i, _)| {
+                    (
+                        (i % self.width as usize) as u8,
+                        (i / self.width as usize) as u8,
+                    )
+                })
+                .collect::<Vec<_>>(),
             prev: None,
             action: None,
         }
@@ -502,10 +497,15 @@ fn main() -> std::io::Result<()> {
         });
     }
 
+    let start_time = Instant::now();
+
     loop {
         match heap.pop() {
             None => {
-                println!("Exhausted search, level is not solvable.");
+                println!(
+                    "Exhausted search after {} states, level is not solvable.",
+                    seen.len()
+                );
                 break;
             }
             Some(heap_state) => {
@@ -513,8 +513,9 @@ fn main() -> std::io::Result<()> {
 
                 if board.is_satisfied() {
                     println!(
-                        "Found solution in {} moves: {}",
+                        "Found solution in {} move after searching {} states: {}",
                         heap_state.g,
+                        seen.len() - heap.len(),
                         path_to_string(&read_path(&heap_state.state))
                     );
                     break;
@@ -546,6 +547,11 @@ fn main() -> std::io::Result<()> {
             }
         }
     }
+
+    println!(
+        "Search finished after {} seconds.",
+        start_time.elapsed().as_secs_f64()
+    );
 
     Ok(())
 }

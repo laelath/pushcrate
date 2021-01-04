@@ -1,2 +1,4 @@
 /target
 *.svg
+*.data
+*.data.old
