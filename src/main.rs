@@ -1,5 +1,7 @@
-use std::collections::{HashSet, VecDeque};
-use std::env;
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum Action {
@@ -9,14 +11,14 @@ enum Action {
     Right,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 enum Tile {
     Empty,
     Wall,
     Box,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone)]
 struct Board {
     width: u8,
     height: u8,
@@ -32,10 +34,63 @@ struct ConstState {
     walls: Vec<bool>,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Eq, Clone)]
 struct SolveState {
     player: (u8, u8),
     boxes: Vec<(u8, u8)>,
+    prev: Option<Rc<SolveState>>,
+    action: Option<Action>,
+}
+
+impl PartialEq for SolveState {
+    fn eq(&self, other: &Self) -> bool {
+        self.player == other.player && self.boxes == other.boxes
+    }
+}
+
+impl Hash for SolveState {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.player.hash(state);
+        self.boxes.hash(state);
+    }
+}
+
+#[derive(Eq)]
+struct HeapState {
+    state: Rc<SolveState>,
+    h: u32,
+    g: u32,
+}
+
+impl Ord for HeapState {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // swapped for min heap
+        (other.h + other.g).cmp(&(self.h + self.g))
+    }
+}
+
+impl PartialOrd for HeapState {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for HeapState {
+    fn eq(&self, other: &Self) -> bool {
+        self.h + self.g == other.h + other.g
+    }
+}
+
+fn difference(x: u32, y: u32) -> u32 {
+    if x < y {
+        y - x
+    } else {
+        x - y
+    }
+}
+
+fn manhattan_distance(u: (u32, u32), v: (u32, u32)) -> u32 {
+    difference(u.0, v.0) + difference(u.1, v.1)
 }
 
 impl Board {
@@ -47,6 +102,7 @@ impl Board {
         self.tiles[y as usize * self.width as usize + x as usize] = tile
     }
 
+    #[allow(dead_code)]
     fn is_empty(&self, x: u8, y: u8) -> bool {
         self.get_tile(x, y) == Tile::Empty
     }
@@ -125,6 +181,53 @@ impl Board {
         }
 
         false
+    }
+
+    fn heuristic(&self) -> u32 {
+        let mut h = 0;
+
+        // requires each box to be moved to a goal
+        // therefore it takes at least as many moves as it takes to move each
+        // box to the goal closest to it
+        let mut boxes = Vec::new();
+        boxes.reserve_exact(self.goals.len());
+
+        for (i, tile) in self.tiles.iter().enumerate() {
+            if tile == &Tile::Box {
+                let tx = i as u32 % self.width as u32;
+                let ty = i as u32 / self.width as u32;
+
+                boxes.push((tx, ty));
+            }
+        }
+
+        let boxes = boxes;
+
+        h += boxes
+            .iter()
+            .map(|(bx, by)| {
+                self.goals
+                    .iter()
+                    .map(|(gx, gy)| manhattan_distance((*bx, *by), (*gx as u32, *gy as u32)))
+                    .min()
+                    .unwrap()
+            })
+            .sum::<u32>();
+
+        // requires the player to move next to a box to start pushing it
+        // therefore we add the the minimum moves to the closest box
+        let px = self.player.0 as u32;
+        let py = self.player.1 as u32;
+
+        h += boxes
+            .iter()
+            .map(|(bx, by)| manhattan_distance((px, py), (*bx, *by)))
+            .min()
+            .unwrap()
+            // subtract one since we only need to move next to the box
+            - 1;
+
+        h
     }
 
     fn create_children(&self) -> Vec<(Board, Action)> {
@@ -208,7 +311,7 @@ impl Board {
         children
     }
 
-    fn to_const_and_solve(self) -> (ConstState, SolveState) {
+    fn extract_const_state(&self) -> ConstState {
         let mut walls = vec![false; self.tiles.len()];
         for (i, tile) in self.tiles.iter().enumerate() {
             if tile == &Tile::Wall {
@@ -216,17 +319,12 @@ impl Board {
             }
         }
 
-        let solve_state = self.extract_solve_state();
-
-        (
-            ConstState {
-                width: self.width,
-                height: self.height,
-                goals: self.goals,
-                walls: walls,
-            },
-            solve_state,
-        )
+        ConstState {
+            width: self.width,
+            height: self.height,
+            goals: self.goals.clone(),
+            walls: walls,
+        }
     }
 
     fn extract_solve_state(&self) -> SolveState {
@@ -245,6 +343,8 @@ impl Board {
         SolveState {
             player: self.player,
             boxes: boxes,
+            prev: None,
+            action: None,
         }
     }
 
@@ -351,6 +451,19 @@ fn parse_level_string(level: &String) -> Result<Board, &'static str> {
     })
 }
 
+fn read_path(end_state: &SolveState) -> Vec<Action> {
+    let mut path = vec![];
+    let mut state = end_state;
+
+    while state.prev.is_some() {
+        path.push(state.action.unwrap());
+        state = &state.prev.as_ref().unwrap();
+    }
+
+    path.reverse();
+    path
+}
+
 fn path_to_string(path: &Vec<Action>) -> String {
     path.into_iter()
         .map(|a| match a {
@@ -363,7 +476,7 @@ fn path_to_string(path: &Vec<Action>) -> String {
 }
 
 fn main() -> std::io::Result<()> {
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = std::env::args().collect();
 
     if args.len() != 2 {
         println!("Usage: {} <sokoban level file>", args[0]);
@@ -373,45 +486,61 @@ fn main() -> std::io::Result<()> {
     let level_string = std::fs::read_to_string(&args[1])?;
     let start = parse_level_string(&level_string).unwrap();
 
-    let (const_state, start_state) = start.to_const_and_solve();
+    let const_state = start.extract_const_state();
 
-    let mut seen: HashSet<SolveState> = HashSet::new();
-    let mut queue: VecDeque<(SolveState, Vec<Action>)> = VecDeque::new();
+    let mut seen: HashSet<Rc<SolveState>> = HashSet::new();
+    let mut heap: BinaryHeap<HeapState> = BinaryHeap::new();
 
-    seen.insert(start_state.clone());
-    queue.push_back((start_state, vec![]));
+    {
+        let start_state = Rc::new(start.extract_solve_state());
+
+        seen.insert(start_state.clone());
+        heap.push(HeapState {
+            state: start_state,
+            h: start.heuristic(),
+            g: 0,
+        });
+    }
 
     loop {
-        match queue.pop_front() {
+        match heap.pop() {
             None => {
                 println!("Exhausted search, level is not solvable.");
                 break;
             }
-            Some((solve_state, path)) => {
-                let board = Board::from_const_and_solve(&const_state, &solve_state);
+            Some(heap_state) => {
+                let board = Board::from_const_and_solve(&const_state, &heap_state.state);
 
                 if board.is_satisfied() {
                     println!(
                         "Found solution in {} moves: {}",
-                        path.len(),
-                        path_to_string(&path)
+                        heap_state.g,
+                        path_to_string(&read_path(&heap_state.state))
                     );
                     break;
                 }
 
-                if board.is_unsolvable() {
-                    continue;
-                }
-
                 for (child, action) in board.create_children() {
-                    let child_state = child.extract_solve_state();
+                    // check if the level is known unsolvable and drop
+                    // do it here to avoid the cost of inserting it into the heap
+                    if child.is_unsolvable() {
+                        continue;
+                    }
+
+                    let mut child_state = child.extract_solve_state();
 
                     if !seen.contains(&child_state) {
-                        seen.insert(child_state.clone());
+                        child_state.action = Some(action);
+                        child_state.prev = Some(heap_state.state.clone());
 
-                        let mut child_path = path.clone();
-                        child_path.push(action);
-                        queue.push_back((child_state, child_path));
+                        let child_state = Rc::new(child_state);
+
+                        seen.insert(child_state.clone());
+                        heap.push(HeapState {
+                            state: child_state,
+                            h: child.heuristic(),
+                            g: heap_state.g + 1,
+                        });
                     }
                 }
             }
