@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashSet};
+use std::collections::{BinaryHeap, HashMap};
+use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::rc::Rc;
@@ -449,11 +450,12 @@ fn main() -> std::io::Result<()> {
     let level_string = std::fs::read_to_string(&args[1])?;
     let start = Rc::new(parse_level_string(&level_string).unwrap());
 
-    let mut seen: HashSet<Rc<Board>> = HashSet::new();
+    // Use a HashMap so we can use the Entry API - hopefully won't need to in a future version of Rust
+    let mut seen: HashMap<Rc<Board>, ()> = HashMap::new();
     let mut heap: BinaryHeap<Node> = BinaryHeap::new();
 
     {
-        seen.insert(start.clone());
+        seen.insert(start.clone(), ());
 
         heap.push(Node {
             board: start,
@@ -473,7 +475,7 @@ fn main() -> std::io::Result<()> {
             None => {
                 tracker.finish();
                 println!(
-                    "\nExhausted search after {} states, level is not solvable.",
+                    "Exhausted search after {} states, level is not solvable.",
                     seen.len()
                 );
                 break;
@@ -486,7 +488,7 @@ fn main() -> std::io::Result<()> {
                 if board.is_satisfied() {
                     tracker.finish();
                     println!(
-                        "\nFound solution of length {}: {}",
+                        "Found solution of length {}: {}",
                         node.g,
                         path_to_string(&read_path(&node.path))
                     );
@@ -500,18 +502,18 @@ fn main() -> std::io::Result<()> {
                         continue;
                     }
 
-                    if !seen.contains(&child) {
-                        let h = child.heuristic();
+                    match seen.entry(Rc::new(child)) {
+                        Entry::Occupied(_) => (),
+                        Entry::Vacant(entry) => {
+                            heap.push(Node {
+                                board: entry.key().clone(),
+                                path: Rc::new(Path::Prev(node.path.clone(), action)),
+                                h: entry.key().heuristic(),
+                                g: node.g + 1,
+                            });
 
-                        let child = Rc::new(child);
-
-                        seen.insert(child.clone());
-                        heap.push(Node {
-                            board: child,
-                            path: Rc::new(Path::Prev(node.path.clone(), action)),
-                            h: h,
-                            g: node.g + 1,
-                        });
+                            entry.insert(());
+                        },
                     }
                 }
             }
