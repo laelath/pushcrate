@@ -27,54 +27,42 @@ struct Board {
     tiles: Vec<Tile>,
 }
 
-struct ConstState {
-    width: u8,
-    goals: Vec<(u8, u8)>,
-    walls: Vec<bool>,
-}
-
-#[derive(Eq, Clone)]
-struct SolveState {
-    player: (u8, u8),
-    boxes: Vec<(u8, u8)>,
-    prev: Option<Rc<SolveState>>,
-    action: Option<Action>,
-}
-
-impl PartialEq for SolveState {
-    fn eq(&self, other: &Self) -> bool {
-        self.player == other.player && self.boxes == other.boxes
-    }
-}
-
-impl Hash for SolveState {
+// somewhat hacky, we only hash the parts of the board that can change
+impl Hash for Board {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.player.hash(state);
-        self.boxes.hash(state);
+        self.iter_boxes().for_each(|xy| xy.hash(state));
     }
+}
+
+#[derive(PartialEq, Eq)]
+enum Path {
+    None,
+    Prev(Rc<Path>, Action),
 }
 
 #[derive(Eq)]
-struct HeapState {
-    state: Rc<SolveState>,
+struct Node {
+    board: Rc<Board>,
+    path: Rc<Path>,
     h: u32,
     g: u32,
 }
 
-impl Ord for HeapState {
+impl Ord for Node {
     fn cmp(&self, other: &Self) -> Ordering {
         // swapped for min heap
         (other.h + other.g).cmp(&(self.h + self.g))
     }
 }
 
-impl PartialOrd for HeapState {
+impl PartialOrd for Node {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl PartialEq for HeapState {
+impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
         self.h + self.g == other.h + other.g
     }
@@ -101,7 +89,19 @@ impl Board {
         self.tiles[y as usize * self.width as usize + x as usize] = tile
     }
 
-    #[allow(dead_code)]
+    fn iter_boxes<'a>(&'a self) -> impl Iterator<Item = (u8, u8)> + 'a {
+        self.tiles
+            .iter()
+            .enumerate()
+            .filter(|(_, tile)| tile == &&Tile::Box)
+            .map(move |(i, _)| {
+                (
+                    (i % self.width as usize) as u8,
+                    (i / self.width as usize) as u8,
+                )
+            })
+    }
+
     fn is_empty(&self, x: u8, y: u8) -> bool {
         self.get_tile(x, y) == Tile::Empty
     }
@@ -133,18 +133,7 @@ impl Board {
     }
 
     fn is_unsolvable(&self) -> bool {
-        for (x, y) in self
-            .tiles
-            .iter()
-            .enumerate()
-            .filter(|(_, tile)| tile == &&Tile::Box)
-            .map(|(i, _)| {
-                (
-                    (i % self.width as usize) as u8,
-                    (i / self.width as usize) as u8,
-                )
-            })
-        {
+        for (x, y) in self.iter_boxes() {
             // board is unsolvable if there is a box in a corner not on a goal
             if (self.is_wall(x - 1, y) && self.is_wall(x, y - 1))
                 || (self.is_wall(x, y - 1) && self.is_wall(x + 1, y))
@@ -180,18 +169,7 @@ impl Board {
     }
 
     fn heuristic(&self) -> u32 {
-        let boxes: Vec<_> = self
-            .tiles
-            .iter()
-            .enumerate()
-            .filter(|(_, tile)| tile == &&Tile::Box)
-            .map(|(i, _)| {
-                (
-                    (i % self.width as usize) as u32,
-                    (i / self.width as usize) as u32,
-                )
-            })
-            .collect();
+        let boxes: Vec<_> = self.iter_boxes().collect();
 
         let mut h = 0;
 
@@ -200,11 +178,13 @@ impl Board {
         // box to the goal closest to it
         h += boxes
             .iter()
-            .filter(|(bx, by)| !self.is_goal(*bx as u8, *by as u8))
+            .filter(|(bx, by)| !self.is_goal(*bx, *by))
             .map(|(bx, by)| {
                 self.goals
                     .iter()
-                    .map(|(gx, gy)| manhattan_distance((*bx, *by), (*gx as u32, *gy as u32)))
+                    .map(|(gx, gy)| {
+                        manhattan_distance((*bx as u32, *by as u32), (*gx as u32, *gy as u32))
+                    })
                     .min()
                     .unwrap()
             })
@@ -214,8 +194,8 @@ impl Board {
         // therefore we add the the minimum moves to the closest box not on a goal
         h += boxes
             .iter()
-            .filter(|(bx, by)| !self.is_goal(*bx as u8, *by as u8))
-            .map(|(bx, by)| manhattan_distance((self.player.0 as u32, self.player.1 as u32), (*bx, *by)))
+            .filter(|(bx, by)| !self.is_goal(*bx, *by))
+            .map(|(bx, by)| manhattan_distance((self.player.0 as u32, self.player.1 as u32), (*bx as u32, *by as u32)))
             .min()
             .unwrap_or(1)
             // subtract one since we only need to move next to the box
@@ -238,7 +218,7 @@ impl Board {
             }
             Tile::Wall => (),
             Tile::Box => {
-                if self.get_tile(px, py - 2) == Tile::Empty {
+                if self.is_empty(px, py - 2) {
                     let mut child = self.clone();
                     child.set_tile(px, py - 2, Tile::Box);
                     child.set_tile(px, py - 1, Tile::Empty);
@@ -256,7 +236,7 @@ impl Board {
             }
             Tile::Wall => (),
             Tile::Box => {
-                if self.get_tile(px, py + 2) == Tile::Empty {
+                if self.is_empty(px, py + 2) {
                     let mut child = self.clone();
                     child.set_tile(px, py + 2, Tile::Box);
                     child.set_tile(px, py + 1, Tile::Empty);
@@ -274,7 +254,7 @@ impl Board {
             }
             Tile::Wall => (),
             Tile::Box => {
-                if self.get_tile(px - 2, py) == Tile::Empty {
+                if self.is_empty(px - 2, py) {
                     let mut child = self.clone();
                     child.set_tile(px - 2, py, Tile::Box);
                     child.set_tile(px - 1, py, Tile::Empty);
@@ -292,7 +272,7 @@ impl Board {
             }
             Tile::Wall => (),
             Tile::Box => {
-                if self.get_tile(px + 2, py) == Tile::Empty {
+                if self.is_empty(px + 2, py) {
                     let mut child = self.clone();
                     child.set_tile(px + 2, py, Tile::Box);
                     child.set_tile(px + 1, py, Tile::Empty);
@@ -303,61 +283,6 @@ impl Board {
         }
 
         children
-    }
-
-    fn extract_const_state(&self) -> ConstState {
-        let mut walls = vec![false; self.tiles.len()];
-        for (i, tile) in self.tiles.iter().enumerate() {
-            if tile == &Tile::Wall {
-                walls[i] = true;
-            }
-        }
-
-        ConstState {
-            width: self.width,
-            goals: self.goals.clone(),
-            walls: walls,
-        }
-    }
-
-    fn extract_solve_state(&self) -> SolveState {
-        SolveState {
-            player: self.player,
-            boxes: self
-                .tiles
-                .iter()
-                .enumerate()
-                .filter(|(_, tile)| tile == &&Tile::Box)
-                .map(|(i, _)| {
-                    (
-                        (i % self.width as usize) as u8,
-                        (i / self.width as usize) as u8,
-                    )
-                })
-                .collect::<Vec<_>>(),
-            prev: None,
-            action: None,
-        }
-    }
-
-    fn from_const_and_solve(const_state: &ConstState, solve_state: &SolveState) -> Self {
-        let mut tiles = vec![Tile::Empty; const_state.walls.len()];
-        for (i, wall) in const_state.walls.iter().enumerate() {
-            if *wall {
-                tiles[i] = Tile::Wall;
-            }
-        }
-
-        for (bx, by) in &solve_state.boxes {
-            tiles[*by as usize * const_state.width as usize + *bx as usize] = Tile::Box;
-        }
-
-        Board {
-            width: const_state.width,
-            player: solve_state.player,
-            goals: const_state.goals.clone(),
-            tiles: tiles,
-        }
     }
 }
 
@@ -441,13 +366,13 @@ fn parse_level_string(level: &String) -> Result<Board, &'static str> {
     })
 }
 
-fn read_path(end_state: &SolveState) -> Vec<Action> {
+fn read_path(end_state: &Rc<Path>) -> Vec<Action> {
     let mut path = vec![];
-    let mut state = end_state;
+    let mut state = end_state.as_ref();
 
-    while state.prev.is_some() {
-        path.push(state.action.unwrap());
-        state = &state.prev.as_ref().unwrap();
+    while let Path::Prev(prev, action) = state {
+        path.push(*action);
+        state = prev.as_ref();
     }
 
     path.reverse();
@@ -474,20 +399,18 @@ fn main() -> std::io::Result<()> {
     }
 
     let level_string = std::fs::read_to_string(&args[1])?;
-    let start = parse_level_string(&level_string).unwrap();
+    let start = Rc::new(parse_level_string(&level_string).unwrap());
 
-    let const_state = start.extract_const_state();
-
-    let mut seen: HashSet<Rc<SolveState>> = HashSet::new();
-    let mut heap: BinaryHeap<HeapState> = BinaryHeap::new();
+    let mut seen: HashSet<Rc<Board>> = HashSet::new();
+    let mut heap: BinaryHeap<Node> = BinaryHeap::new();
 
     {
-        let start_state = Rc::new(start.extract_solve_state());
+        seen.insert(start.clone());
 
-        seen.insert(start_state.clone());
-        heap.push(HeapState {
-            state: start_state,
-            h: start.heuristic(),
+        heap.push(Node {
+            board: start,
+            path: Rc::new(Path::None),
+            h: 0, // don't really need heuristic for start node
             g: 0,
         });
     }
@@ -503,15 +426,15 @@ fn main() -> std::io::Result<()> {
                 );
                 break;
             }
-            Some(heap_state) => {
-                let board = Board::from_const_and_solve(&const_state, &heap_state.state);
+            Some(node) => {
+                let board = &node.board;
 
                 if board.is_satisfied() {
                     println!(
-                        "Found solution in {} move after searching {} states: {}",
-                        heap_state.g,
+                        "Found solution in {} moves after searching {} states: {}",
+                        node.g,
                         seen.len() - heap.len(),
-                        path_to_string(&read_path(&heap_state.state))
+                        path_to_string(&read_path(&node.path))
                     );
                     break;
                 }
@@ -523,19 +446,17 @@ fn main() -> std::io::Result<()> {
                         continue;
                     }
 
-                    let mut child_state = child.extract_solve_state();
+                    if !seen.contains(&child) {
+                        let h = child.heuristic();
 
-                    if !seen.contains(&child_state) {
-                        child_state.action = Some(action);
-                        child_state.prev = Some(heap_state.state.clone());
+                        let child = Rc::new(child);
 
-                        let child_state = Rc::new(child_state);
-
-                        seen.insert(child_state.clone());
-                        heap.push(HeapState {
-                            state: child_state,
-                            h: child.heuristic(),
-                            g: heap_state.g + 1,
+                        seen.insert(child.clone());
+                        heap.push(Node {
+                            board: child,
+                            path: Rc::new(Path::Prev(node.path.clone(), action)),
+                            h: h,
+                            g: node.g + 1,
                         });
                     }
                 }
