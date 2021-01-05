@@ -1,4 +1,4 @@
-use crate::board::{Action, Board};
+use crate::board::{Action, Board, BoardState};
 
 use std::collections::{BinaryHeap, HashMap};
 use std::collections::hash_map::Entry;
@@ -60,7 +60,7 @@ enum Path {
 
 #[derive(Eq)]
 struct Node {
-    board: Rc<Board>,
+    state: Rc<BoardState>,
     path: Rc<Path>,
     h: u32,
     g: u32,
@@ -85,9 +85,9 @@ impl PartialEq for Node {
     }
 }
 
-pub fn find_path(start: &Board) -> Option<Vec<Action>> {
+pub fn find_path(board: &Board, start: &BoardState) -> Option<Vec<Action>> {
     // Use a HashMap so we can use the Entry API - hopefully won't need to in a future version of Rust
-    let mut seen: HashMap<Rc<Board>, ()> = HashMap::new();
+    let mut seen: HashMap<Rc<BoardState>, ()> = HashMap::new();
     let mut heap: BinaryHeap<Node> = BinaryHeap::new();
 
     {
@@ -96,7 +96,7 @@ pub fn find_path(start: &Board) -> Option<Vec<Action>> {
         seen.insert(start.clone(), ());
 
         heap.push(Node {
-            board: start,
+            state: start,
             path: Rc::new(Path::None),
             h: 0, // don't really need heuristic for start node
             g: 0,
@@ -113,29 +113,23 @@ pub fn find_path(start: &Board) -> Option<Vec<Action>> {
                 return None;
             }
             Some(node) => {
-                let board = &node.board;
+                let state = &node.state;
 
                 tracker.update(node.g, node.h);
 
-                if board.is_satisfied() {
+                if board.is_goal_state(&state) {
                     tracker.finish();
                     return Some(read_path(&node.path));
                 }
 
-                for (child, action) in board.create_children() {
-                    // check if the level is known unsolvable and drop
-                    // do it here to avoid the cost of inserting it into the heap
-                    if child.is_unsolvable() {
-                        continue;
-                    }
-
+                for (child, action) in board.create_children(&state) {
                     match seen.entry(Rc::new(child)) {
                         Entry::Occupied(_) => (),
                         Entry::Vacant(entry) => {
                             heap.push(Node {
-                                board: entry.key().clone(),
+                                state: entry.key().clone(),
                                 path: Rc::new(Path::Prev(node.path.clone(), action)),
-                                h: entry.key().heuristic(),
+                                h: board.heuristic(&entry.key()),
                                 g: node.g + 1,
                             });
 

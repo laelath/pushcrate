@@ -1,4 +1,4 @@
-use std::hash::{Hash, Hasher};
+use std::ops::{Index, IndexMut};
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Action {
@@ -8,27 +8,69 @@ pub enum Action {
     Right,
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 enum Tile {
     Empty,
     Wall,
     Box,
 }
 
-#[derive(PartialEq, Eq, Clone)]
-pub struct Board {
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct Tiles {
+    data: Vec<Tile>,
     width: u8,
-    player: (u8, u8),
-    goals: Vec<(u8, u8)>,
-    tiles: Vec<Tile>,
 }
 
-// somewhat hacky, we only hash the parts of the board that can change
-impl Hash for Board {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.player.hash(state);
-        self.iter_boxes().for_each(|xy| xy.hash(state));
+impl Index<(u8, u8)> for Tiles {
+    type Output = Tile;
+
+    fn index(&self, (x, y): (u8, u8)) -> &Self::Output {
+        &self.data[y as usize * self.width as usize + x as usize]
     }
+}
+
+impl IndexMut<(u8, u8)> for Tiles {
+    fn index_mut(&mut self, (x, y): (u8, u8)) -> &mut Self::Output {
+        &mut self.data[y as usize * self.width as usize + x as usize]
+    }
+}
+
+impl Tiles {
+    fn is_empty(&self, x: u8, y: u8) -> bool {
+        self[(x, y)] == Tile::Empty
+    }
+
+    fn is_wall(&self, x: u8, y: u8) -> bool {
+        self[(x, y)] == Tile::Wall
+    }
+
+    fn is_box(&self, x: u8, y: u8) -> bool {
+        self[(x, y)] == Tile::Box
+    }
+
+    fn iter_boxes<'a>(&'a self) -> impl Iterator<Item = (u8, u8)> + 'a {
+        self.data
+            .iter()
+            .enumerate()
+            .filter(|(_, tile)| tile == &&Tile::Box)
+            .map(move |(i, _)| {
+                (
+                    (i % self.width as usize) as u8,
+                    (i / self.width as usize) as u8,
+                )
+            })
+    }
+}
+
+#[derive(Clone)]
+pub struct Board {
+    goals: Vec<(u8, u8)>,
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+pub struct BoardState {
+    player: (u8, u8),
+    tiles: Tiles,
 }
 
 fn difference(x: u32, y: u32) -> u32 {
@@ -44,64 +86,27 @@ fn manhattan_distance(u: (u32, u32), v: (u32, u32)) -> u32 {
 }
 
 impl Board {
-    fn get_tile(&self, x: u8, y: u8) -> Tile {
-        self.tiles[y as usize * self.width as usize + x as usize]
-    }
-
-    fn set_tile(&mut self, x: u8, y: u8, tile: Tile) {
-        self.tiles[y as usize * self.width as usize + x as usize] = tile
-    }
-
-    fn iter_boxes<'a>(&'a self) -> impl Iterator<Item = (u8, u8)> + 'a {
-        self.tiles
-            .iter()
-            .enumerate()
-            .filter(|(_, tile)| tile == &&Tile::Box)
-            .map(move |(i, _)| {
-                (
-                    (i % self.width as usize) as u8,
-                    (i / self.width as usize) as u8,
-                )
-            })
-    }
-
-    fn is_empty(&self, x: u8, y: u8) -> bool {
-        self.get_tile(x, y) == Tile::Empty
-    }
-
-    fn is_wall(&self, x: u8, y: u8) -> bool {
-        self.get_tile(x, y) == Tile::Wall
-    }
-
-    fn is_box(&self, x: u8, y: u8) -> bool {
-        self.get_tile(x, y) == Tile::Box
-    }
-
     fn is_goal(&self, x: u8, y: u8) -> bool {
-        for (gx, gy) in &self.goals {
-            if x == *gx && y == *gy {
-                return true;
-            }
-        }
-        false
+        self.goals.contains(&(x, y))
     }
 
-    pub fn is_satisfied(&self) -> bool {
+    pub fn is_goal_state(&self, state: &BoardState) -> bool {
         for (x, y) in &self.goals {
-            if self.get_tile(*x, *y) != Tile::Box {
+            if !state.tiles.is_box(*x, *y) {
                 return false;
             }
         }
+
         true
     }
 
-    pub fn is_unsolvable(&self) -> bool {
-        for (x, y) in self.iter_boxes() {
+    fn is_unsolvable(&self, state: &BoardState) -> bool {
+        for (x, y) in state.tiles.iter_boxes() {
             // board is unsolvable if there is a box in a corner not on a goal
-            if (self.is_wall(x - 1, y) && self.is_wall(x, y - 1))
-                || (self.is_wall(x, y - 1) && self.is_wall(x + 1, y))
-                || (self.is_wall(x + 1, y) && self.is_wall(x, y + 1))
-                || (self.is_wall(x, y + 1) && self.is_wall(x - 1, y))
+            if (state.tiles.is_wall(x - 1, y) && state.tiles.is_wall(x, y - 1))
+                || (state.tiles.is_wall(x, y - 1) && state.tiles.is_wall(x + 1, y))
+                || (state.tiles.is_wall(x + 1, y) && state.tiles.is_wall(x, y + 1))
+                || (state.tiles.is_wall(x, y + 1) && state.tiles.is_wall(x - 1, y))
             {
                 if !self.is_goal(x, y) {
                     return true;
@@ -109,18 +114,18 @@ impl Board {
             }
 
             // board is unsolvable if there are two boxes next to each other next to walls
-            if self.is_box(x + 1, y)
-                && (self.is_wall(x, y - 1) || self.is_wall(x, y + 1))
-                && (self.is_wall(x + 1, y - 1) || self.is_wall(x + 1, y + 1))
+            if state.tiles.is_box(x + 1, y)
+                && (state.tiles.is_wall(x, y - 1) || state.tiles.is_wall(x, y + 1))
+                && (state.tiles.is_wall(x + 1, y - 1) || state.tiles.is_wall(x + 1, y + 1))
             {
                 if !(self.is_goal(x, y) && self.is_goal(x + 1, y)) {
                     return true;
                 }
             }
 
-            if self.is_box(x, y + 1)
-                && (self.is_wall(x - 1, y) || self.is_wall(x + 1, y))
-                && (self.is_wall(x - 1, y + 1) || self.is_wall(x + 1, y + 1))
+            if state.tiles.is_box(x, y + 1)
+                && (state.tiles.is_wall(x - 1, y) || state.tiles.is_wall(x + 1, y))
+                && (state.tiles.is_wall(x - 1, y + 1) || state.tiles.is_wall(x + 1, y + 1))
             {
                 if !(self.is_goal(x, y) && self.is_goal(x, y + 1)) {
                     return true;
@@ -131,24 +136,27 @@ impl Board {
         false
     }
 
-    pub fn heuristic(&self) -> u32 {
-        let boxes: Vec<_> = self.iter_boxes().collect();
-
+    pub fn heuristic(&self, state: &BoardState) -> u32 {
         let mut h = 0;
 
-        let unsat_goals: Vec<_> = self.goals.iter().filter(|(x, y)| !self.is_box(*x, *y)).collect();
+        let unsat_goals: Vec<_> = self
+            .goals
+            .iter()
+            .filter(|(x, y)| !state.tiles.is_box(*x, *y))
+            .collect();
 
         // requires each box to be moved to a goal
         // therefore it takes at least as many moves as it takes to move each
         // box to the goal closest to it
-        h += boxes
-            .iter()
+        h += state
+            .tiles
+            .iter_boxes()
             .filter(|(bx, by)| !self.is_goal(*bx, *by))
             .map(|(bx, by)| {
                 unsat_goals
                     .iter()
                     .map(|(gx, gy)| {
-                        manhattan_distance((*bx as u32, *by as u32), (*gx as u32, *gy as u32))
+                        manhattan_distance((bx as u32, by as u32), (*gx as u32, *gy as u32))
                     })
                     .min()
                     .unwrap()
@@ -157,10 +165,11 @@ impl Board {
 
         // requires the player to move next to a box to start pushing it
         // therefore we add the the minimum moves to the closest box not on a goal
-        h += boxes
-            .iter()
+        h += state
+            .tiles
+            .iter_boxes()
             .filter(|(bx, by)| !self.is_goal(*bx, *by))
-            .map(|(bx, by)| manhattan_distance((self.player.0 as u32, self.player.1 as u32), (*bx as u32, *by as u32)))
+            .map(|(bx, by)| manhattan_distance((state.player.0 as u32, state.player.1 as u32), (bx as u32, by as u32)))
             .min()
             .unwrap_or(1)
             // subtract one since we only need to move next to the box
@@ -169,88 +178,92 @@ impl Board {
         h
     }
 
-    pub fn create_children(&self) -> Vec<(Board, Action)> {
-        let px = self.player.0;
-        let py = self.player.1;
+    pub fn create_children(&self, state: &BoardState) -> Vec<(BoardState, Action)> {
+        let px = state.player.0;
+        let py = state.player.1;
 
-        let mut children = Vec::new();
+        let mut children: Vec<(BoardState, Action)> = Vec::new();
 
-        match self.get_tile(px, py - 1) {
+        match state.tiles[(px, py - 1)] {
             Tile::Empty => {
-                let mut child = self.clone();
+                let mut child = state.clone();
                 child.player.1 = py - 1;
                 children.push((child, Action::Up));
             }
             Tile::Wall => (),
             Tile::Box => {
-                if self.is_empty(px, py - 2) {
-                    let mut child = self.clone();
-                    child.set_tile(px, py - 2, Tile::Box);
-                    child.set_tile(px, py - 1, Tile::Empty);
+                if state.tiles.is_empty(px, py - 2) {
+                    let mut child = state.clone();
+                    child.tiles[(px, py - 2)] = Tile::Box;
+                    child.tiles[(px, py - 1)] = Tile::Empty;
                     child.player.1 = py - 1;
                     children.push((child, Action::Up));
                 }
             }
         }
 
-        match self.get_tile(px, py + 1) {
+        match state.tiles[(px, py + 1)] {
             Tile::Empty => {
-                let mut child = self.clone();
+                let mut child = state.clone();
                 child.player.1 = py + 1;
                 children.push((child, Action::Down));
             }
             Tile::Wall => (),
             Tile::Box => {
-                if self.is_empty(px, py + 2) {
-                    let mut child = self.clone();
-                    child.set_tile(px, py + 2, Tile::Box);
-                    child.set_tile(px, py + 1, Tile::Empty);
+                if state.tiles.is_empty(px, py + 2) {
+                    let mut child = state.clone();
+                    child.tiles[(px, py + 2)] = Tile::Box;
+                    child.tiles[(px, py + 1)] = Tile::Empty;
                     child.player.1 = py + 1;
                     children.push((child, Action::Down));
                 }
             }
         }
 
-        match self.get_tile(px - 1, py) {
+        match state.tiles[(px - 1, py)] {
             Tile::Empty => {
-                let mut child = self.clone();
+                let mut child = state.clone();
                 child.player.0 = px - 1;
                 children.push((child, Action::Left));
             }
             Tile::Wall => (),
             Tile::Box => {
-                if self.is_empty(px - 2, py) {
-                    let mut child = self.clone();
-                    child.set_tile(px - 2, py, Tile::Box);
-                    child.set_tile(px - 1, py, Tile::Empty);
+                if state.tiles.is_empty(px - 2, py) {
+                    let mut child = state.clone();
+                    child.tiles[(px - 2, py)] = Tile::Box;
+                    child.tiles[(px - 1, py)] = Tile::Empty;
                     child.player.0 = px - 1;
                     children.push((child, Action::Left));
                 }
             }
         }
 
-        match self.get_tile(px + 1, py) {
+        match state.tiles[(px + 1, py)] {
             Tile::Empty => {
-                let mut child = self.clone();
+                let mut child = state.clone();
                 child.player.0 = px + 1;
                 children.push((child, Action::Right));
             }
             Tile::Wall => (),
             Tile::Box => {
-                if self.is_empty(px + 2, py) {
-                    let mut child = self.clone();
-                    child.set_tile(px + 2, py, Tile::Box);
-                    child.set_tile(px + 1, py, Tile::Empty);
+                if state.tiles.is_empty(px + 2, py) {
+                    let mut child = state.clone();
+                    child.tiles[(px + 2, py)] = Tile::Box;
+                    child.tiles[(px + 1, py)] = Tile::Empty;
                     child.player.0 = px + 1;
                     children.push((child, Action::Right));
                 }
             }
         }
 
+        // Filter out children that are known unsolvable
         children
+            .into_iter()
+            .filter(|(state, _)| !self.is_unsolvable(state))
+            .collect()
     }
 
-    pub fn parse_level_string(level: &String) -> Result<Self, &'static str> {
+    pub fn parse_level_string(level: &String) -> Result<(Self, BoardState), &'static str> {
         // ensure that the level only contains valid characters
         for c in level.chars() {
             if !"#pPbB@+$*. -_\n".contains(c) {
@@ -299,8 +312,8 @@ impl Board {
                         num_boxes += 1;
                     }
                     'B' | '*' => {
-                        tiles[width * i + j] = Tile::Box;
                         goals.push((j as u8, i as u8));
+                        tiles[width * i + j] = Tile::Box;
                         num_boxes += 1;
                     }
                     '.' => goals.push((j as u8, i as u8)),
@@ -325,11 +338,17 @@ impl Board {
 
         // TODO: verify the level is enclosed in walls
 
-        Ok(Board {
-            width: width as u8,
-            player: players[0],
-            goals: goals,
-            tiles: tiles,
-        })
+        Ok((
+            Board {
+                goals: goals,
+            },
+            BoardState {
+                player: players[0],
+                tiles: Tiles {
+                    data: tiles,
+                    width: width as u8,
+                },
+            },
+        ))
     }
 }

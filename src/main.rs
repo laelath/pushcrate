@@ -25,11 +25,11 @@ fn main() -> std::io::Result<()> {
     }
 
     let level_string = std::fs::read_to_string(&args[1])?;
-    let start = Board::parse_level_string(&level_string).unwrap();
+    let (board, start) = Board::parse_level_string(&level_string).unwrap();
 
     let start_time = Instant::now();
 
-    match search::find_path(&start) {
+    match search::find_path(&board, &start) {
         Some(path) => println!("Found solution: {}", path_to_string(&path)),
         None => println!("Exhausted search, level is not solvable."),
     }
