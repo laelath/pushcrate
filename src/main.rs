@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -390,6 +391,53 @@ fn path_to_string(path: &Vec<Action>) -> String {
         .collect()
 }
 
+struct ProgressTracker {
+    frequency: u32,
+    max_seen_depth: u32,
+    max_seen_f: u32,
+    counter: u32,
+}
+
+impl ProgressTracker {
+    fn update(&mut self, depth: u32, h: u32) {
+        self.counter += 1;
+
+        self.max_seen_depth = std::cmp::max(self.max_seen_depth, depth);
+        self.max_seen_f = std::cmp::max(self.max_seen_f, depth + h);
+
+        if self.counter % self.frequency == 0 {
+            self.print_progress();
+            std::io::stdout().flush().unwrap();
+        }
+    }
+
+    fn print_progress(&self) {
+        print!("\x1B[0G\x1B[K");
+        print!(
+            "Searched {} states, to a max depth of {}, solution is at least {} steps.",
+            self.counter, self.max_seen_depth, self.max_seen_f
+        );
+    }
+
+    fn finish(&self) {
+        self.print_progress();
+        println!();
+    }
+
+    fn create(frequency: u32) -> Self {
+        let pt = ProgressTracker {
+            frequency: frequency,
+            max_seen_depth: 0,
+            max_seen_f: 0,
+            counter: 0,
+        };
+
+        pt.print_progress();
+
+        pt
+    }
+}
+
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
@@ -415,13 +463,17 @@ fn main() -> std::io::Result<()> {
         });
     }
 
+    // frequency is visually appealing - not obvious it's skipping numbers
+    let mut tracker = ProgressTracker::create(7919);
+
     let start_time = Instant::now();
 
     loop {
         match heap.pop() {
             None => {
+                tracker.finish();
                 println!(
-                    "Exhausted search after {} states, level is not solvable.",
+                    "\nExhausted search after {} states, level is not solvable.",
                     seen.len()
                 );
                 break;
@@ -429,11 +481,13 @@ fn main() -> std::io::Result<()> {
             Some(node) => {
                 let board = &node.board;
 
+                tracker.update(node.g, node.h);
+
                 if board.is_satisfied() {
+                    tracker.finish();
                     println!(
-                        "Found solution in {} moves after searching {} states: {}",
+                        "\nFound solution of length {}: {}",
                         node.g,
-                        seen.len() - heap.len(),
                         path_to_string(&read_path(&node.path))
                     );
                     break;
