@@ -358,6 +358,9 @@ fn parse_level_string(level: &String) -> Result<Board, &'static str> {
         return Err("Number of boxes and number of goals are not the same");
     }
 
+    tiles.shrink_to_fit();
+    goals.shrink_to_fit();
+
     // TODO: verify the level is enclosed in walls
 
     Ok(Board {
@@ -413,9 +416,8 @@ impl ProgressTracker {
     }
 
     fn print_progress(&self) {
-        print!("\x1B[0G\x1B[K");
         print!(
-            "Searched {} states, to a max depth of {}, solution is at least {} steps.",
+            "\x1B[0G\x1B[KSearched {} states, to a max depth of {}, solution is at least {} steps.",
             self.counter, self.max_seen_depth, self.max_seen_f
         );
     }
