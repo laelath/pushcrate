@@ -1,4 +1,4 @@
-use std::ops::{Index, IndexMut};
+use std::collections::VecDeque;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Action {
@@ -8,69 +8,17 @@ pub enum Action {
     Right,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-enum Tile {
-    Empty,
-    Wall,
-    Box,
-}
-
-#[derive(PartialEq, Eq, Hash, Clone)]
-struct Tiles {
-    data: Vec<Tile>,
-    width: u8,
-}
-
-impl Index<(u8, u8)> for Tiles {
-    type Output = Tile;
-
-    fn index(&self, (x, y): (u8, u8)) -> &Self::Output {
-        &self.data[y as usize * self.width as usize + x as usize]
-    }
-}
-
-impl IndexMut<(u8, u8)> for Tiles {
-    fn index_mut(&mut self, (x, y): (u8, u8)) -> &mut Self::Output {
-        &mut self.data[y as usize * self.width as usize + x as usize]
-    }
-}
-
-impl Tiles {
-    fn is_empty(&self, x: u8, y: u8) -> bool {
-        self[(x, y)] == Tile::Empty
-    }
-
-    fn is_wall(&self, x: u8, y: u8) -> bool {
-        self[(x, y)] == Tile::Wall
-    }
-
-    fn is_box(&self, x: u8, y: u8) -> bool {
-        self[(x, y)] == Tile::Box
-    }
-
-    fn iter_boxes<'a>(&'a self) -> impl Iterator<Item = (u8, u8)> + 'a {
-        self.data
-            .iter()
-            .enumerate()
-            .filter(|(_, tile)| tile == &&Tile::Box)
-            .map(move |(i, _)| {
-                (
-                    (i % self.width as usize) as u8,
-                    (i / self.width as usize) as u8,
-                )
-            })
-    }
-}
-
 #[derive(Clone)]
 pub struct Board {
-    goals: Vec<(u8, u8)>,
+    goals: Vec<((u8, u8), Vec<u32>)>,
+    width: u8,
+    walls: Vec<bool>,
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct BoardState {
     player: (u8, u8),
-    tiles: Tiles,
+    boxes: Vec<bool>,
 }
 
 fn difference(x: u32, y: u32) -> u32 {
@@ -87,12 +35,34 @@ fn manhattan_distance(u: (u32, u32), v: (u32, u32)) -> u32 {
 
 impl Board {
     fn is_goal(&self, x: u8, y: u8) -> bool {
-        self.goals.contains(&(x, y))
+        for ((gx, gy), _) in &self.goals {
+            if x == *gx && y == *gy {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn is_empty(&self, state: &BoardState, x: u8, y: u8) -> bool {
+        !self.is_wall(x, y) && !self.is_box(state, x, y)
+    }
+
+    fn is_wall(&self, x: u8, y: u8) -> bool {
+        self.walls[y as usize * self.width as usize + x as usize]
+    }
+
+    fn is_box(&self, state: &BoardState, x: u8, y: u8) -> bool {
+        state.boxes[y as usize * self.width as usize + x as usize]
+    }
+
+    fn set_box(&self, state: &mut BoardState, x: u8, y: u8, box_bit: bool) {
+        state.boxes[y as usize * self.width as usize + x as usize] = box_bit;
     }
 
     pub fn is_goal_state(&self, state: &BoardState) -> bool {
-        for (x, y) in &self.goals {
-            if !state.tiles.is_box(*x, *y) {
+        for ((x, y), _) in &self.goals {
+            if !self.is_box(state, *x, *y) {
                 return false;
             }
         }
@@ -100,13 +70,27 @@ impl Board {
         true
     }
 
+    fn iter_boxes<'a>(&'a self, state: &'a BoardState) -> impl Iterator<Item = (u8, u8)> + 'a {
+        state
+            .boxes
+            .iter()
+            .enumerate()
+            .filter(|(_, tile)| **tile)
+            .map(move |(i, _)| {
+                (
+                    (i % self.width as usize) as u8,
+                    (i / self.width as usize) as u8,
+                )
+            })
+    }
+
     fn is_unsolvable(&self, state: &BoardState) -> bool {
-        for (x, y) in state.tiles.iter_boxes() {
+        for (x, y) in self.iter_boxes(state) {
             // board is unsolvable if there is a box in a corner not on a goal
-            if (state.tiles.is_wall(x - 1, y) && state.tiles.is_wall(x, y - 1))
-                || (state.tiles.is_wall(x, y - 1) && state.tiles.is_wall(x + 1, y))
-                || (state.tiles.is_wall(x + 1, y) && state.tiles.is_wall(x, y + 1))
-                || (state.tiles.is_wall(x, y + 1) && state.tiles.is_wall(x - 1, y))
+            if (self.is_wall(x - 1, y) && self.is_wall(x, y - 1))
+                || (self.is_wall(x, y - 1) && self.is_wall(x + 1, y))
+                || (self.is_wall(x + 1, y) && self.is_wall(x, y + 1))
+                || (self.is_wall(x, y + 1) && self.is_wall(x - 1, y))
             {
                 if !self.is_goal(x, y) {
                     return true;
@@ -114,18 +98,18 @@ impl Board {
             }
 
             // board is unsolvable if there are two boxes next to each other next to walls
-            if state.tiles.is_box(x + 1, y)
-                && (state.tiles.is_wall(x, y - 1) || state.tiles.is_wall(x, y + 1))
-                && (state.tiles.is_wall(x + 1, y - 1) || state.tiles.is_wall(x + 1, y + 1))
+            if self.is_box(state, x + 1, y)
+                && (self.is_wall(x, y - 1) || self.is_wall(x, y + 1))
+                && (self.is_wall(x + 1, y - 1) || self.is_wall(x + 1, y + 1))
             {
                 if !(self.is_goal(x, y) && self.is_goal(x + 1, y)) {
                     return true;
                 }
             }
 
-            if state.tiles.is_box(x, y + 1)
-                && (state.tiles.is_wall(x - 1, y) || state.tiles.is_wall(x + 1, y))
-                && (state.tiles.is_wall(x - 1, y + 1) || state.tiles.is_wall(x + 1, y + 1))
+            if self.is_box(state, x, y + 1)
+                && (self.is_wall(x - 1, y) || self.is_wall(x + 1, y))
+                && (self.is_wall(x - 1, y + 1) || self.is_wall(x + 1, y + 1))
             {
                 if !(self.is_goal(x, y) && self.is_goal(x, y + 1)) {
                     return true;
@@ -139,25 +123,23 @@ impl Board {
     pub fn heuristic(&self, state: &BoardState) -> u32 {
         let mut h = 0;
 
-        let unsat_goals: Vec<_> = self
+        let unsat_goal_dists: Vec<_> = self
             .goals
             .iter()
-            .filter(|(x, y)| !state.tiles.is_box(*x, *y))
+            .filter(|((x, y), _)| !self.is_box(state, *x, *y))
+            .map(|(_, dists)| dists)
             .collect();
 
         // requires each box to be moved to a goal
         // therefore it takes at least as many moves as it takes to move each
         // box to the goal closest to it
-        h += state
-            .tiles
-            .iter_boxes()
-            .filter(|(bx, by)| !self.is_goal(*bx, *by))
+        h += self
+            .iter_boxes(state)
+            .filter(|(x, y)| !self.is_goal(*x, *y))
             .map(|(bx, by)| {
-                unsat_goals
+                unsat_goal_dists
                     .iter()
-                    .map(|(gx, gy)| {
-                        manhattan_distance((bx as u32, by as u32), (*gx as u32, *gy as u32))
-                    })
+                    .map(|dists| dists[by as usize * self.width as usize + bx as usize])
                     .min()
                     .unwrap()
             })
@@ -165,9 +147,8 @@ impl Board {
 
         // requires the player to move next to a box to start pushing it
         // therefore we add the the minimum moves to the closest box not on a goal
-        h += state
-            .tiles
-            .iter_boxes()
+        h += self
+            .iter_boxes(state)
             .filter(|(bx, by)| !self.is_goal(*bx, *by))
             .map(|(bx, by)| manhattan_distance((state.player.0 as u32, state.player.1 as u32), (bx as u32, by as u32)))
             .min()
@@ -184,76 +165,76 @@ impl Board {
 
         let mut children: Vec<(BoardState, Action)> = Vec::new();
 
-        match state.tiles[(px, py - 1)] {
-            Tile::Empty => {
+        match (self.is_wall(px, py - 1), self.is_box(state, px, py - 1)) {
+            (false, false) => {
                 let mut child = state.clone();
                 child.player.1 = py - 1;
                 children.push((child, Action::Up));
             }
-            Tile::Wall => (),
-            Tile::Box => {
-                if state.tiles.is_empty(px, py - 2) {
+            (false, true) => {
+                if self.is_empty(state, px, py - 2) {
                     let mut child = state.clone();
-                    child.tiles[(px, py - 2)] = Tile::Box;
-                    child.tiles[(px, py - 1)] = Tile::Empty;
+                    self.set_box(&mut child, px, py - 2, true);
+                    self.set_box(&mut child, px, py - 1, false);
                     child.player.1 = py - 1;
                     children.push((child, Action::Up));
                 }
             }
+            (true, _) => (),
         }
 
-        match state.tiles[(px, py + 1)] {
-            Tile::Empty => {
+        match (self.is_wall(px, py + 1), self.is_box(state, px, py + 1)) {
+            (false, false) => {
                 let mut child = state.clone();
                 child.player.1 = py + 1;
                 children.push((child, Action::Down));
             }
-            Tile::Wall => (),
-            Tile::Box => {
-                if state.tiles.is_empty(px, py + 2) {
+            (false, true) => {
+                if self.is_empty(state, px, py + 2) {
                     let mut child = state.clone();
-                    child.tiles[(px, py + 2)] = Tile::Box;
-                    child.tiles[(px, py + 1)] = Tile::Empty;
+                    self.set_box(&mut child, px, py + 2, true);
+                    self.set_box(&mut child, px, py + 1, false);
                     child.player.1 = py + 1;
                     children.push((child, Action::Down));
                 }
             }
+            (true, _) => (),
         }
 
-        match state.tiles[(px - 1, py)] {
-            Tile::Empty => {
+        match (self.is_wall(px - 1, py), self.is_box(state, px - 1, py)) {
+            (false, false) => {
                 let mut child = state.clone();
                 child.player.0 = px - 1;
                 children.push((child, Action::Left));
             }
-            Tile::Wall => (),
-            Tile::Box => {
-                if state.tiles.is_empty(px - 2, py) {
+            (false, true) => {
+                if self.is_empty(state, px - 2, py) {
                     let mut child = state.clone();
-                    child.tiles[(px - 2, py)] = Tile::Box;
-                    child.tiles[(px - 1, py)] = Tile::Empty;
+                    self.set_box(&mut child, px - 2, py, true);
+                    self.set_box(&mut child, px - 1, py, false);
                     child.player.0 = px - 1;
                     children.push((child, Action::Left));
                 }
             }
+            (true, _) => (),
         }
 
-        match state.tiles[(px + 1, py)] {
-            Tile::Empty => {
+        match (self.is_wall(px + 1, py), self.is_box(state, px + 1, py)) {
+            (false, false) => {
                 let mut child = state.clone();
                 child.player.0 = px + 1;
                 children.push((child, Action::Right));
             }
-            Tile::Wall => (),
-            Tile::Box => {
-                if state.tiles.is_empty(px + 2, py) {
+            (false, true) => {
+                if self.is_empty(state, px + 2, py) {
                     let mut child = state.clone();
-                    child.tiles[(px + 2, py)] = Tile::Box;
-                    child.tiles[(px + 1, py)] = Tile::Empty;
+                    self.set_box(&mut child, px + 2, py, true);
+                    self.set_box(&mut child, px + 1, py, false);
                     child.player.0 = px + 1;
                     children.push((child, Action::Right));
                 }
             }
+            (true, _) => (),
         }
 
         // Filter out children that are known unsolvable
@@ -294,26 +275,27 @@ impl Board {
         let mut players = Vec::new();
 
         let mut goals = Vec::new();
-        let mut tiles = vec![Tile::Empty; width * height];
+        let mut walls = vec![false; width * height];
+        let mut boxes = vec![false; width * height];
 
         let mut num_boxes = 0;
 
         for (i, line) in lines.into_iter().enumerate() {
             for (j, c) in line.chars().enumerate() {
                 match c {
-                    '#' => tiles[width * i + j] = Tile::Wall,
+                    '#' => walls[width * i + j] = true,
                     'p' | '@' => players.push((j as u8, i as u8)),
                     'P' | '+' => {
                         players.push((j as u8, i as u8));
                         goals.push((j as u8, i as u8));
                     }
                     'b' | '$' => {
-                        tiles[width * i + j] = Tile::Box;
+                        boxes[width * i + j] = true;
                         num_boxes += 1;
                     }
                     'B' | '*' => {
                         goals.push((j as u8, i as u8));
-                        tiles[width * i + j] = Tile::Box;
+                        boxes[width * i + j] = true;
                         num_boxes += 1;
                     }
                     '.' => goals.push((j as u8, i as u8)),
@@ -333,22 +315,53 @@ impl Board {
             return Err("Number of boxes and number of goals are not the same");
         }
 
-        tiles.shrink_to_fit();
-        goals.shrink_to_fit();
-
         // TODO: verify the level is enclosed in walls
+
+        let goal_distances = Board::calculate_goal_distances(&goals, width, &walls);
 
         Ok((
             Board {
-                goals: goals,
+                goals: goals.into_iter().zip(goal_distances).collect(),
+                width: width as u8,
+                walls: walls,
             },
             BoardState {
                 player: players[0],
-                tiles: Tiles {
-                    data: tiles,
-                    width: width as u8,
-                },
+                boxes: boxes,
             },
         ))
+    }
+
+    fn calculate_goal_distances(
+        goals: &Vec<(u8, u8)>,
+        width: usize,
+        walls: &Vec<bool>,
+    ) -> Vec<Vec<u32>> {
+        goals
+            .iter()
+            .map(|goal| Board::calculate_goal_distance(*goal, width, walls))
+            .collect()
+    }
+
+    fn calculate_goal_distance(goal: (u8, u8), width: usize, walls: &Vec<bool>) -> Vec<u32> {
+        let mut dists = vec![0; walls.len()];
+
+        let mut seen = vec![false; walls.len()];
+        let mut queue = VecDeque::new();
+
+        queue.push_back((goal.0 as usize, goal.1 as usize, 0));
+
+        while let Some((x, y, d)) = queue.pop_front() {
+            if !seen[y * width + x] && !walls[y * width + x] {
+                seen[y * width + x] = true;
+                dists[y * width + x] = d;
+                queue.push_back((x + 1, y, d + 1));
+                queue.push_back((x - 1, y, d + 1));
+                queue.push_back((x, y + 1, d + 1));
+                queue.push_back((x, y - 1, d + 1));
+            }
+        }
+
+        dists
     }
 }

@@ -91,12 +91,8 @@ pub fn find_path(board: &Board, start: &BoardState) -> Option<Vec<Action>> {
     let mut heap: BinaryHeap<Node> = BinaryHeap::new();
 
     {
-        let start = Rc::new(start.clone());
-
-        seen.insert(start.clone(), ());
-
         heap.push(Node {
-            state: start,
+            state: Rc::new(start.clone()),
             path: Rc::new(Path::None),
             h: 0, // don't really need heuristic for start node
             g: 0,
@@ -113,6 +109,13 @@ pub fn find_path(board: &Board, start: &BoardState) -> Option<Vec<Action>> {
                 return None;
             }
             Some(node) => {
+                match seen.entry(node.state.clone()) {
+                    Entry::Occupied(_) => continue,
+                    Entry::Vacant(entry) => {
+                        entry.insert(());
+                    },
+                }
+
                 let state = &node.state;
 
                 tracker.update(node.g, node.h);
@@ -123,19 +126,13 @@ pub fn find_path(board: &Board, start: &BoardState) -> Option<Vec<Action>> {
                 }
 
                 for (child, action) in board.create_children(&state) {
-                    match seen.entry(Rc::new(child)) {
-                        Entry::Occupied(_) => (),
-                        Entry::Vacant(entry) => {
-                            heap.push(Node {
-                                state: entry.key().clone(),
-                                path: Rc::new(Path::Prev(node.path.clone(), action)),
-                                h: board.heuristic(&entry.key()),
-                                g: node.g + 1,
-                            });
-
-                            entry.insert(());
-                        },
-                    }
+                    let h = board.heuristic(&child);
+                    heap.push(Node {
+                        state: Rc::new(child),
+                        path: Rc::new(Path::Prev(node.path.clone(), action)),
+                        h: h,
+                        g: node.g + 1,
+                    });
                 }
             }
         }
