@@ -100,7 +100,7 @@ pub fn find_path(board: &Board, start: &BoardState) -> Option<Vec<Action>> {
     }
 
     // frequency is visually appealing - not obvious it's skipping numbers
-    let mut tracker = ProgressTracker::create(123);
+    let mut tracker = ProgressTracker::create(1237);
 
     loop {
         match heap.pop() {

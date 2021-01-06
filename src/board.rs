@@ -173,6 +173,7 @@ impl Board {
                 }
             }
 
+            path.shrink_to_fit();
             path
         };
 
@@ -190,7 +191,9 @@ impl Board {
                     self.set_box(&mut child, x, y - 2, true);
                     self.set_box(&mut child, x, y - 1, false);
                     child.player = (x, y - 1);
-                    children.push((child, read_path(&paths, index, Action::Up)));
+                    if !self.is_unsolvable(&child) {
+                        children.push((child, read_path(&paths, index, Action::Up)));
+                    }
                 }
 
                 if self.is_box(state, x, y + 1) && self.is_empty(state, x, y + 2) {
@@ -198,7 +201,9 @@ impl Board {
                     self.set_box(&mut child, x, y + 2, true);
                     self.set_box(&mut child, x, y + 1, false);
                     child.player = (x, y + 1);
-                    children.push((child, read_path(&paths, index, Action::Down)));
+                    if !self.is_unsolvable(&child) {
+                        children.push((child, read_path(&paths, index, Action::Down)));
+                    }
                 }
 
                 if self.is_box(state, x - 1, y) && self.is_empty(state, x - 2, y) {
@@ -206,7 +211,9 @@ impl Board {
                     self.set_box(&mut child, x - 2, y, true);
                     self.set_box(&mut child, x - 1, y, false);
                     child.player = (x - 1, y);
-                    children.push((child, read_path(&paths, index, Action::Left)));
+                    if !self.is_unsolvable(&child) {
+                        children.push((child, read_path(&paths, index, Action::Left)));
+                    }
                 }
 
                 if self.is_box(state, x + 1, y) && self.is_empty(state, x + 2, y) {
@@ -214,7 +221,9 @@ impl Board {
                     self.set_box(&mut child, x + 2, y, true);
                     self.set_box(&mut child, x + 1, y, false);
                     child.player = (x + 1, y);
-                    children.push((child, read_path(&paths, index, Action::Right)));
+                    if !self.is_unsolvable(&child) {
+                        children.push((child, read_path(&paths, index, Action::Right)));
+                    }
                 }
 
                 queue.push_back((x, y - 1, Some(Action::Up)));
@@ -224,11 +233,7 @@ impl Board {
             }
         }
 
-        // Filter out children that are known unsolvable
         children
-            .into_iter()
-            .filter(|(state, _)| !self.is_unsolvable(state))
-            .collect()
     }
 
     pub fn parse_level_string(level: &String) -> Result<(Self, BoardState), &'static str> {
