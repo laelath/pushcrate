@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
+use std::hash::{Hash, Hasher};
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Action {
     Up,
     Down,
@@ -15,22 +16,21 @@ pub struct Board {
     walls: Vec<bool>,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct BoardState {
     player: (u8, u8),
     boxes: Vec<bool>,
 }
 
-fn difference(x: u32, y: u32) -> u32 {
-    if x < y {
-        y - x
-    } else {
-        x - y
+impl Hash for BoardState {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.player.hash(state);
+        self.boxes
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| **b)
+            .for_each(|(i, _)| i.hash(state));
     }
-}
-
-fn manhattan_distance(u: (u32, u32), v: (u32, u32)) -> u32 {
-    difference(u.0, v.0) + difference(u.1, v.1)
 }
 
 impl Board {
@@ -145,96 +145,83 @@ impl Board {
             })
             .sum::<u32>();
 
-        // requires the player to move next to a box to start pushing it
-        // therefore we add the the minimum moves to the closest box not on a goal
-        h += self
-            .iter_boxes(state)
-            .filter(|(bx, by)| !self.is_goal(*bx, *by))
-            .map(|(bx, by)| manhattan_distance((state.player.0 as u32, state.player.1 as u32), (bx as u32, by as u32)))
-            .min()
-            .unwrap_or(1)
-            // subtract one since we only need to move next to the box
-            - 1;
-
         h
     }
 
-    pub fn create_children(&self, state: &BoardState) -> Vec<(BoardState, Action)> {
+    pub fn create_children(&self, state: &BoardState) -> Vec<(BoardState, Vec<Action>)> {
         let px = state.player.0;
         let py = state.player.1;
 
-        let mut children: Vec<(BoardState, Action)> = Vec::new();
+        let mut children = Vec::new();
 
-        match (self.is_wall(px, py - 1), self.is_box(state, px, py - 1)) {
-            (false, false) => {
-                let mut child = state.clone();
-                child.player.1 = py - 1;
-                children.push((child, Action::Up));
-            }
-            (false, true) => {
-                if self.is_empty(state, px, py - 2) {
-                    let mut child = state.clone();
-                    self.set_box(&mut child, px, py - 2, true);
-                    self.set_box(&mut child, px, py - 1, false);
-                    child.player.1 = py - 1;
-                    children.push((child, Action::Up));
+        let mut paths = vec![None; self.walls.len()];
+        let mut seen = vec![false; self.walls.len()];
+        let mut queue = VecDeque::new();
+
+        let read_path = |paths: &Vec<_>, index, action| -> Vec<Action> {
+            let mut path = vec![action];
+            let mut index = index;
+
+            while let Some(action) = paths[index] {
+                path.push(action);
+
+                match action {
+                    Action::Up => index += self.width as usize,
+                    Action::Down => index -= self.width as usize,
+                    Action::Left => index += 1,
+                    Action::Right => index -= 1,
                 }
             }
-            (true, _) => (),
-        }
 
-        match (self.is_wall(px, py + 1), self.is_box(state, px, py + 1)) {
-            (false, false) => {
-                let mut child = state.clone();
-                child.player.1 = py + 1;
-                children.push((child, Action::Down));
-            }
-            (false, true) => {
-                if self.is_empty(state, px, py + 2) {
-                    let mut child = state.clone();
-                    self.set_box(&mut child, px, py + 2, true);
-                    self.set_box(&mut child, px, py + 1, false);
-                    child.player.1 = py + 1;
-                    children.push((child, Action::Down));
-                }
-            }
-            (true, _) => (),
-        }
+            path
+        };
 
-        match (self.is_wall(px - 1, py), self.is_box(state, px - 1, py)) {
-            (false, false) => {
-                let mut child = state.clone();
-                child.player.0 = px - 1;
-                children.push((child, Action::Left));
-            }
-            (false, true) => {
-                if self.is_empty(state, px - 2, py) {
-                    let mut child = state.clone();
-                    self.set_box(&mut child, px - 2, py, true);
-                    self.set_box(&mut child, px - 1, py, false);
-                    child.player.0 = px - 1;
-                    children.push((child, Action::Left));
-                }
-            }
-            (true, _) => (),
-        }
+        queue.push_back((px, py, None));
 
-        match (self.is_wall(px + 1, py), self.is_box(state, px + 1, py)) {
-            (false, false) => {
-                let mut child = state.clone();
-                child.player.0 = px + 1;
-                children.push((child, Action::Right));
-            }
-            (false, true) => {
-                if self.is_empty(state, px + 2, py) {
+        while let Some((x, y, action)) = queue.pop_front() {
+            let index = y as usize * self.width as usize + x as usize;
+
+            if !seen[index] && self.is_empty(state, x, y) {
+                seen[index] = true;
+                paths[index] = action;
+
+                if self.is_box(state, x, y - 1) && self.is_empty(state, x, y - 2) {
                     let mut child = state.clone();
-                    self.set_box(&mut child, px + 2, py, true);
-                    self.set_box(&mut child, px + 1, py, false);
-                    child.player.0 = px + 1;
-                    children.push((child, Action::Right));
+                    self.set_box(&mut child, x, y - 2, true);
+                    self.set_box(&mut child, x, y - 1, false);
+                    child.player = (x, y - 1);
+                    children.push((child, read_path(&paths, index, Action::Up)));
                 }
+
+                if self.is_box(state, x, y + 1) && self.is_empty(state, x, y + 2) {
+                    let mut child = state.clone();
+                    self.set_box(&mut child, x, y + 2, true);
+                    self.set_box(&mut child, x, y + 1, false);
+                    child.player = (x, y + 1);
+                    children.push((child, read_path(&paths, index, Action::Down)));
+                }
+
+                if self.is_box(state, x - 1, y) && self.is_empty(state, x - 2, y) {
+                    let mut child = state.clone();
+                    self.set_box(&mut child, x - 2, y, true);
+                    self.set_box(&mut child, x - 1, y, false);
+                    child.player = (x - 1, y);
+                    children.push((child, read_path(&paths, index, Action::Left)));
+                }
+
+                if self.is_box(state, x + 1, y) && self.is_empty(state, x + 2, y) {
+                    let mut child = state.clone();
+                    self.set_box(&mut child, x + 2, y, true);
+                    self.set_box(&mut child, x + 1, y, false);
+                    child.player = (x + 1, y);
+                    children.push((child, read_path(&paths, index, Action::Right)));
+                }
+
+                queue.push_back((x, y - 1, Some(Action::Up)));
+                queue.push_back((x, y + 1, Some(Action::Down)));
+                queue.push_back((x - 1, y, Some(Action::Left)));
+                queue.push_back((x + 1, y, Some(Action::Right)));
             }
-            (true, _) => (),
         }
 
         // Filter out children that are known unsolvable

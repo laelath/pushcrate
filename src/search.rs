@@ -55,7 +55,7 @@ impl ProgressTracker {
 #[derive(PartialEq, Eq)]
 enum Path {
     None,
-    Prev(Rc<Path>, Action),
+    Prev(Rc<Path>, Vec<Action>),
 }
 
 #[derive(Eq)]
@@ -100,7 +100,7 @@ pub fn find_path(board: &Board, start: &BoardState) -> Option<Vec<Action>> {
     }
 
     // frequency is visually appealing - not obvious it's skipping numbers
-    let mut tracker = ProgressTracker::create(7919);
+    let mut tracker = ProgressTracker::create(123);
 
     loop {
         match heap.pop() {
@@ -125,13 +125,14 @@ pub fn find_path(board: &Board, start: &BoardState) -> Option<Vec<Action>> {
                     return Some(read_path(&node.path));
                 }
 
-                for (child, action) in board.create_children(&state) {
+                for (child, actions) in board.create_children(&state) {
                     let h = board.heuristic(&child);
+                    let g = node.g + actions.len() as u32;
                     heap.push(Node {
                         state: Rc::new(child),
-                        path: Rc::new(Path::Prev(node.path.clone(), action)),
+                        path: Rc::new(Path::Prev(node.path.clone(), actions)),
                         h: h,
-                        g: node.g + 1,
+                        g: g,
                     });
                 }
             }
@@ -143,12 +144,11 @@ fn read_path(end_state: &Rc<Path>) -> Vec<Action> {
     let mut path = vec![];
     let mut state = end_state.as_ref();
 
-    while let Path::Prev(prev, action) = state {
-        path.push(*action);
+    while let Path::Prev(prev, actions) = state {
+        actions.iter().for_each(|action| path.push(*action));
         state = prev.as_ref();
     }
 
     path.reverse();
     path
 }
-
