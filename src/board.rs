@@ -118,6 +118,8 @@ impl Board {
     pub fn heuristic(&self, state: &BoardState) -> u32 {
         let mut h = 0;
 
+        // TODO: Use Hungarian Algorithm to find optimal matching
+
         let unsat_goal_dists: Vec<_> = self
             .goals
             .iter()
@@ -249,12 +251,6 @@ impl Board {
         let height = lines.len();
         let width = lines.iter().map(|s| s.len()).max().unwrap();
 
-        // if width > u8::MAX.into() {
-        //     return Err("Level width is greater than 255.");
-        // } else if height > u8::MAX.into() {
-        //     return Err("Level height is greater than 255.");
-        // }
-
         let mut players = Vec::new();
 
         let mut goals = Vec::new();
@@ -338,7 +334,7 @@ impl Board {
             }
         }
 
-        let goal_distances = Board::calculate_goal_distances(&goals, width, &walls);
+        let goal_distances = Board::calculate_goal_distances(&goals, width, &walls, &dead_tiles);
 
         Ok((
             Board {
@@ -359,14 +355,22 @@ impl Board {
         goals: &'a [(u32, u32)],
         width: usize,
         walls: &'a [bool],
+        dead_tiles: &'a [bool],
     ) -> Vec<Box<[u32]>> {
         goals
             .iter()
-            .map(|goal| Board::calculate_goal_distance(*goal, width, walls).into_boxed_slice())
+            .map(|goal| {
+                Board::calculate_goal_distance(*goal, width, walls, dead_tiles).into_boxed_slice()
+            })
             .collect()
     }
 
-    fn calculate_goal_distance(goal: (u32, u32), width: usize, walls: &[bool]) -> Vec<u32> {
+    fn calculate_goal_distance(
+        goal: (u32, u32),
+        width: usize,
+        walls: &[bool],
+        dead_tiles: &[bool],
+    ) -> Vec<u32> {
         let mut dists = vec![0; walls.len()];
 
         let mut seen = vec![false; walls.len()];
@@ -375,7 +379,7 @@ impl Board {
         queue.push_back((goal.0 as usize, goal.1 as usize, 0));
 
         while let Some((x, y, d)) = queue.pop_front() {
-            if !seen[y * width + x] && !walls[y * width + x] {
+            if !seen[y * width + x] && !walls[y * width + x] && !dead_tiles[y * width + x]{
                 seen[y * width + x] = true;
                 dists[y * width + x] = d;
                 queue.push_back((x + 1, y, d + 1));
