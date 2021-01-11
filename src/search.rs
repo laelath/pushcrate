@@ -55,7 +55,7 @@ impl ProgressTracker {
 #[derive(PartialEq, Eq)]
 enum Path {
     None,
-    Prev(Rc<Path>, Vec<Action>),
+    Prev(Rc<Path>, Box<[Action]>),
 }
 
 #[derive(Eq)]
