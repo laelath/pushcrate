@@ -321,12 +321,21 @@ impl Board {
 
         let dead_tiles = Board::find_dead_tiles(width, &walls, &interior, &goal_tiles);
 
+        // print out board info for debug purposes
+        // TODO: separate this out into a function
         for i in 0..walls.len() {
-            match (walls[i], dead_tiles[i], goal_tiles[i]) {
-                (true, _, _) => print!("#"),
-                (false, true, _) => print!("x"),
-                (false, false, true) => print!("."),
-                _ => print!(" "),
+            let is_player = i == players[0].1 as usize * width + players[0].0 as usize;
+            match (walls[i], dead_tiles[i], goal_tiles[i], crates[i], is_player) {
+                (true, _, _, _, _) => print!("#"),
+                (false, true, _, false, false) => print!("-"),
+                (false, true, _, false, true) => print!("%"),
+                (false, true, _, true, _) => print!("!"),
+                (false, false, true, false, false) => print!("."),
+                (false, false, true, false, true) => print!("+"),
+                (false, false, false, true, _) => print!("$"),
+                (false, false, true, true, _) => print!("*"),
+                (false, false, false, false, true) => print!("@"),
+                (false, false, false, false, false) => print!(" "),
             }
 
             if i % width == width - 1 {
