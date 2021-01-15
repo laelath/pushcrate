@@ -87,10 +87,11 @@ impl Board {
 
     fn is_unsolvable(&self, state: &BoardState) -> bool {
         for (x, y) in self.iter_crates(state) {
+            // we now check this as we move the crates
             // board is unsolvable if there is a crate on a dead tile
-            if self.is_dead_tile(x, y) {
-                return true;
-            }
+            // if self.is_dead_tile(x, y) {
+            //     return true;
+            // }
 
             // board is unsolvable if there are two crates next to each other next to walls
             if self.is_crate(state, x + 1, y)
@@ -179,7 +180,7 @@ impl Board {
                 seen[index] = true;
                 paths[index] = action;
 
-                if self.is_crate(state, x, y - 1) && self.is_empty(state, x, y - 2) {
+                if self.is_crate(state, x, y - 1) && self.is_empty(state, x, y - 2) && !self.is_dead_tile(x, y - 2) {
                     let mut child = state.clone();
                     self.set_crate(&mut child, x, y - 2, true);
                     self.set_crate(&mut child, x, y - 1, false);
@@ -189,7 +190,7 @@ impl Board {
                     }
                 }
 
-                if self.is_crate(state, x, y + 1) && self.is_empty(state, x, y + 2) {
+                if self.is_crate(state, x, y + 1) && self.is_empty(state, x, y + 2) && !self.is_dead_tile(x, y + 2) {
                     let mut child = state.clone();
                     self.set_crate(&mut child, x, y + 2, true);
                     self.set_crate(&mut child, x, y + 1, false);
@@ -199,7 +200,7 @@ impl Board {
                     }
                 }
 
-                if self.is_crate(state, x - 1, y) && self.is_empty(state, x - 2, y) {
+                if self.is_crate(state, x - 1, y) && self.is_empty(state, x - 2, y) && !self.is_dead_tile(x - 2, y) {
                     let mut child = state.clone();
                     self.set_crate(&mut child, x - 2, y, true);
                     self.set_crate(&mut child, x - 1, y, false);
@@ -209,7 +210,7 @@ impl Board {
                     }
                 }
 
-                if self.is_crate(state, x + 1, y) && self.is_empty(state, x + 2, y) {
+                if self.is_crate(state, x + 1, y) && self.is_empty(state, x + 2, y) && !self.is_dead_tile(x + 2, y) {
                     let mut child = state.clone();
                     self.set_crate(&mut child, x + 2, y, true);
                     self.set_crate(&mut child, x + 1, y, false);
