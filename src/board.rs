@@ -180,7 +180,10 @@ impl Board {
                 seen[index] = true;
                 paths[index] = action;
 
-                if self.is_crate(state, x, y - 1) && self.is_empty(state, x, y - 2) && !self.is_dead_tile(x, y - 2) {
+                if self.is_crate(state, x, y - 1)
+                    && self.is_empty(state, x, y - 2)
+                    && !self.is_dead_tile(x, y - 2)
+                {
                     let mut child = state.clone();
                     self.set_crate(&mut child, x, y - 2, true);
                     self.set_crate(&mut child, x, y - 1, false);
@@ -190,7 +193,10 @@ impl Board {
                     }
                 }
 
-                if self.is_crate(state, x, y + 1) && self.is_empty(state, x, y + 2) && !self.is_dead_tile(x, y + 2) {
+                if self.is_crate(state, x, y + 1)
+                    && self.is_empty(state, x, y + 2)
+                    && !self.is_dead_tile(x, y + 2)
+                {
                     let mut child = state.clone();
                     self.set_crate(&mut child, x, y + 2, true);
                     self.set_crate(&mut child, x, y + 1, false);
@@ -200,7 +206,10 @@ impl Board {
                     }
                 }
 
-                if self.is_crate(state, x - 1, y) && self.is_empty(state, x - 2, y) && !self.is_dead_tile(x - 2, y) {
+                if self.is_crate(state, x - 1, y)
+                    && self.is_empty(state, x - 2, y)
+                    && !self.is_dead_tile(x - 2, y)
+                {
                     let mut child = state.clone();
                     self.set_crate(&mut child, x - 2, y, true);
                     self.set_crate(&mut child, x - 1, y, false);
@@ -210,7 +219,10 @@ impl Board {
                     }
                 }
 
-                if self.is_crate(state, x + 1, y) && self.is_empty(state, x + 2, y) && !self.is_dead_tile(x + 2, y) {
+                if self.is_crate(state, x + 1, y)
+                    && self.is_empty(state, x + 2, y)
+                    && !self.is_dead_tile(x + 2, y)
+                {
                     let mut child = state.clone();
                     self.set_crate(&mut child, x + 2, y, true);
                     self.set_crate(&mut child, x + 1, y, false);
@@ -389,7 +401,7 @@ impl Board {
         queue.push_back((goal.0 as usize, goal.1 as usize, 0));
 
         while let Some((x, y, d)) = queue.pop_front() {
-            if !seen[y * width + x] && !walls[y * width + x] && !dead_tiles[y * width + x]{
+            if !seen[y * width + x] && !walls[y * width + x] && !dead_tiles[y * width + x] {
                 seen[y * width + x] = true;
                 dists[y * width + x] = d;
                 queue.push_back((x + 1, y, d + 1));
